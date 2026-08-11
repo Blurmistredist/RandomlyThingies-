@@ -3,6 +3,7 @@
 #include "../Module.hpp"
 #include "../ModuleRegistry.hpp"
 #include <chrono>
+#include <random>
 #include <vector>
 
 class FPSGraphModule : public Module {
@@ -43,26 +44,24 @@ private:
 
     Clock::time_point m_lastFrame{};
     Clock::time_point m_fakeStart{};
+    Clock::time_point m_fakeNextJump{};
     bool m_hasLastFrame = false;
+    bool m_fakeHighRange = false;
+    float m_fakeDisplayedFps = 2500.0f;
+    std::mt19937 m_fakeRng{std::random_device{}()};
 
     std::vector<float> m_fpsHistory;
     std::vector<float> m_jitterHistory;
     std::vector<float> m_ramHistory;
-    std::vector<float> m_pingHistory;
     std::vector<float> m_low1History;
-    std::vector<float> m_msptHistory;
-    std::vector<float> m_tpsHistory;
 
     float m_currentFps = 0.0f;
     float m_averageFps = 0.0f;
     float m_jitterMs = 0.0f;
     float m_ramGb = 0.0f;
-    float m_pingMs = 0.0f;
     float m_onePercentLow = 0.0f;
-    float m_mspt = 0.0f;
-    float m_tps = 20.0f;
 
-    float getDisplayedFps(float realFps) const;
+    float getDisplayedFps(float realFps);
     void pushHistory(std::vector<float>& history, float value);
     void rebuildStatistics();
     float readResidentMemoryGb() const;

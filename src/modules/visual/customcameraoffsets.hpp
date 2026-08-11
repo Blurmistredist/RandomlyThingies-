@@ -1,85 +1,47 @@
 #pragma once
 
 #include "../Module.hpp"
-
+#include <bedrocktools/Api.hpp>
+#include <bedrocktools/events/Events.hpp>
 #include <bedrocktools/sdk/Types.hpp>
-#include <bedrocktools/sdk/world/BlockSource.hpp>
-#include <nlohmann/json.hpp>
 
-class CustomCameraOffsetsModule final : public Module {
+class CustomCameraOffsetsModule : public Module {
 public:
     CustomCameraOffsetsModule();
-    ~CustomCameraOffsetsModule() override;
 
     void onInit() override;
     void onEnable() override;
     void onDisable() override;
     void onFrame() override;
+    void onClientInstanceUpdate(
+        const bedrocktools::events::ClientInstanceUpdateEvent& event);
 
-    void loadConfig(const nlohmann::json& j) override;
-    void saveConfig(nlohmann::json& j) override;
+private:
+    void updateCamera(bedrocktools::sdk::ClientInstance* client);
+    bool isThirdPersonActive(
+        bedrocktools::sdk::ClientInstance* client) const;
 
-    bool isThirdPerson() const;
+    bedrocktools::sdk::Vec3 getDesiredCameraPosition(
+        bedrocktools::sdk::ClientInstance* client) const;
+    bedrocktools::sdk::Vec3 collisionCorrect(
+        bedrocktools::sdk::ClientInstance* client,
+        const bedrocktools::sdk::Vec3& origin,
+        const bedrocktools::sdk::Vec3& desired) const;
 
-    // Dynamic third-person camera
     float m_distance = 4.0f;
     float m_minDistance = 0.75f;
     float m_maxDistance = 10.0f;
-
     float m_shoulderX = 0.0f;
     float m_height = 1.55f;
-
-    // Additional orbit offsets. The camera still follows the
-    // player's live look direction, so the mobile aim direction
-    // remains the source of truth for interaction.
     float m_yawOffset = 0.0f;
     float m_pitchOffset = 0.0f;
-
-    float m_positionSmoothing = 0.30f;
-
+    float m_positionSmoothing = 0.0f;
+    bool m_dynamicDistance = false;
     bool m_onlyThirdPerson = true;
-    bool m_dynamicDistance = true;
 
-    // Always show a center reticle while this module is enabled.
-    bool m_forceCrosshair = true;
-    float m_crosshairSize = 7.0f;
-    float m_crosshairThickness = 2.0f;
-    float m_crosshairGap = 3.0f;
+    bool m_initialized = false;
+    bool m_haveCamera = false;
+    bedrocktools::sdk::Vec3 m_smoothedCamera{};
 
-    bool isThirdPersonActive() const {
-        return m_thirdPerson;
-    }
-
-    void setThirdPersonState(bool value) {
-        m_thirdPerson = value;
-    }
-
-    bool m_hasLastCamera = false;
-
-    bedrocktools::sdk::Vec3 m_lastCamera{
-        0.0f, 0.0f, 0.0f
-    };
-
-    bedrocktools::sdk::Vec3 calculateCameraPosition(
-        const bedrocktools::sdk::Vec3& playerPos,
-        const bedrocktools::sdk::Vec2& playerRotation,
-        bedrocktools::sdk::BlockSource* region) const;
-
-private:
-    bool m_thirdPerson = false;
-    bool m_renderHooked = false;
-    bool m_perspectiveHooked = false;
-    bool m_cursorHooked = false;
-
-    void* m_renderTarget = nullptr;
-    void* m_perspectiveTarget = nullptr;
-    void* m_cursorTarget = nullptr;
-
-    void updateCamera();
-    void drawCrosshair();
-
-    bedrocktools::sdk::Vec3 resolveCameraCollision(
-        const bedrocktools::sdk::Vec3& origin,
-        const bedrocktools::sdk::Vec3& target,
-        bedrocktools::sdk::BlockSource* region) const;
+    std::uint64_t m_clientUpdateSubscription = 0;
 };

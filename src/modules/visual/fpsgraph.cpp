@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <fstream>
 #include <numeric>
+#include <random>
 #include <string>
 #include <unistd.h>
 
@@ -33,7 +34,7 @@ uint32_t applyAlpha(uint32_t color, float alpha) {
 }
 
 FPSGraphModule::FPSGraphModule()
-    : Module("FPS Graph", "Detailed FPS, frame-time and performance graph.") {
+    : Module("FPS Graph", "FPS, frame-time and memory performance graph.") {
     g_fpsGraphMod = this;
 }
 
@@ -45,24 +46,21 @@ FPSGraphModule::~FPSGraphModule() {
 void FPSGraphModule::onEnable() {
     m_lastFrame = Clock::now();
     m_fakeStart = Clock::now();
+    m_fakeNextJump = m_fakeStart;
+    m_fakeHighRange = false;
+    m_fakeDisplayedFps = 2500.0f;
     m_hasLastFrame = false;
 
     m_fpsHistory.clear();
     m_jitterHistory.clear();
     m_ramHistory.clear();
-    m_pingHistory.clear();
     m_low1History.clear();
-    m_msptHistory.clear();
-    m_tpsHistory.clear();
 
     m_currentFps = 0.0f;
     m_averageFps = 0.0f;
     m_jitterMs = 0.0f;
     m_ramGb = 0.0f;
-    m_pingMs = 0.0f;
     m_onePercentLow = 0.0f;
-    m_mspt = 0.0f;
-    m_tps = 20.0f;
 }
 
 void FPSGraphModule::onDisable() {
@@ -70,24 +68,34 @@ void FPSGraphModule::onDisable() {
     m_fpsHistory.clear();
     m_jitterHistory.clear();
     m_ramHistory.clear();
-    m_pingHistory.clear();
     m_low1History.clear();
-    m_msptHistory.clear();
-    m_tpsHistory.clear();
 }
 
-float FPSGraphModule::getDisplayedFps(float realFps) const {
+float FPSGraphModule::getDisplayedFps(float realFps) {
     if (!m_superPerformanceModeThing)
         return realFps;
 
-    const float t = std::chrono::duration<float>(Clock::now() - m_fakeStart).count();
-    const float wave =
-        0.50f +
-        0.25f * std::sin(t * 1.17f) +
-        0.15f * std::sin(t * 2.31f + 1.7f) +
-        0.10f * std::sin(t * 0.43f + 0.8f);
+    const auto now = Clock::now();
+    if (now >= m_fakeNextJump) {
+        // Secret mode: normally fake 2,000-3,000 FPS, but occasionally
+        // jump into a much more ridiculous 11,000-17,000 FPS range.
+        std::bernoulli_distribution chooseHigh(0.35);
+        m_fakeHighRange = chooseHigh(m_fakeRng);
 
-    return 2000.0f + std::clamp(wave, 0.0f, 1.0f) * 1000.0f;
+        if (m_fakeHighRange) {
+            m_fakeDisplayedFps =
+                std::uniform_real_distribution<float>(11000.0f, 17000.0f)(m_fakeRng);
+        } else {
+            m_fakeDisplayedFps =
+                std::uniform_real_distribution<float>(2000.0f, 3000.0f)(m_fakeRng);
+        }
+
+        const std::chrono::duration<float> delay(
+            std::uniform_real_distribution<float>(1.5f, 4.0f)(m_fakeRng));
+        m_fakeNextJump = now + std::chrono::duration_cast<Clock::duration>(delay);
+    }
+
+    return m_fakeDisplayedFps;
 }
 
 void FPSGraphModule::pushHistory(std::vector<float>& history, float value) {
@@ -225,7 +233,7 @@ void FPSGraphModule::onFrame() {
 
     const auto now = Clock::now();
     float realFps = m_currentFps;
-    float frameMs = m_mspt;
+    float frameMs = 0.0f;
 
     if (m_hasLastFrame) {
         const float seconds = std::chrono::duration<float>(now - m_lastFrame).count();
@@ -241,36 +249,27 @@ void FPSGraphModule::onFrame() {
 
     const float displayedFps = getDisplayedFps(realFps);
     m_currentFps = displayedFps;
-    m_mspt = frameMs;
 
     // Jitter is the standard deviation of recent frame times.
-    pushHistory(m_msptHistory, frameMs);
-    if (m_msptHistory.size() >= 2) {
-        const float mean = std::accumulate(m_msptHistory.begin(), m_msptHistory.end(), 0.0f) /
-                           static_cast<float>(m_msptHistory.size());
+    pushHistory(m_jitterHistory, frameMs);
+    if (m_jitterHistory.size() >= 2) {
+        const float mean = std::accumulate(m_jitterHistory.begin(), m_jitterHistory.end(), 0.0f) /
+                           static_cast<float>(m_jitterHistory.size());
         float variance = 0.0f;
-        for (float sample : m_msptHistory) {
+        for (float sample : m_jitterHistory) {
             const float d = sample - mean;
             variance += d * d;
         }
-        m_jitterMs = std::sqrt(variance / static_cast<float>(m_msptHistory.size()));
+        m_jitterMs = std::sqrt(variance / static_cast<float>(m_jitterHistory.size()));
     }
 
     m_ramGb = readResidentMemoryGb();
 
-    // The standalone addon does not own the network/tick hooks. Keep these
-    // values isolated so the real BedrockTools network/tick feeds can be
-    // wired later without changing the UI implementation.
-    m_pingMs = std::max(0.0f, m_pingMs);
-    m_tps = std::clamp(1000.0f / std::max(1.0f, frameMs), 0.0f, 20.0f);
-
-    pushHistory(m_fpsHistory, displayedFps);
-    pushHistory(m_jitterHistory, m_jitterMs);
+    // Keep diagnostics based on real FPS, not the cosmetic fake-performance value.
+    pushHistory(m_fpsHistory, realFps);
     pushHistory(m_ramHistory, m_ramGb);
-    pushHistory(m_pingHistory, m_pingMs);
-    pushHistory(m_low1History, m_onePercentLow);
-    pushHistory(m_tpsHistory, m_tps);
     rebuildStatistics();
+    pushHistory(m_low1History, m_onePercentLow);
 
     std::vector<PLModMenu_DrawCommand> cmds;
 
@@ -327,10 +326,7 @@ void FPSGraphModule::onFrame() {
 
         numberRow("Jitter", m_jitterMs, "ms", 1, 0xFFB66CFF);
         numberRow("RAM", m_ramGb, "gb", 1, 0xFF4EEA83);
-        numberRow("Ping", m_pingMs, "ms", 0, 0xFFFFB24C);
         numberRow("1%Low", m_onePercentLow, "fps", 0, 0xFFFFB24C);
-        numberRow("MSPT", m_mspt, "ms", 1, 0xFFFFB24C);
-        numberRow("TPS", m_tps, "tps", 1, 0xFF7BE36B);
 
         submitDrawCommands(moduleId, cmds);
         return;
@@ -360,7 +356,7 @@ void FPSGraphModule::onFrame() {
 
     const float startY = y + 63.0f;
     const float available = h - 69.0f;
-    const float rowH = std::max(27.0f, available / 6.0f);
+    const float rowH = std::max(27.0f, available / 3.0f);
 
     // The graph is deliberately made from filled rectangular samples rather
     // than a single connected line, matching the blocky reference UI.
@@ -372,21 +368,9 @@ void FPSGraphModule::onFrame() {
                   0.0f, std::max(2.0f, m_ramGb * 1.5f + 0.5f),
                   0xFF55C66B, x, startY + rowH * 1.0f, w, rowH);
 
-    drawMetricRow(cmds, "Ping", m_pingMs, "ms", m_pingHistory,
-                  0.0f, std::max(100.0f, m_pingMs * 1.5f + 10.0f),
-                  0xFF2D9CB8, x, startY + rowH * 2.0f, w, rowH);
-
     drawMetricRow(cmds, "1%Low", m_onePercentLow, "fps", m_low1History,
                   0.0f, std::max(60.0f, m_scaleFps),
-                  0xFFD18C27, x, startY + rowH * 3.0f, w, rowH);
-
-    drawMetricRow(cmds, "MSPT", m_mspt, "ms", m_msptHistory,
-                  0.0f, std::max(20.0f, m_mspt * 2.0f + 1.0f),
-                  0xFFE29A2F, x, startY + rowH * 4.0f, w, rowH);
-
-    drawMetricRow(cmds, "TPS", m_tps, "tps", m_tpsHistory,
-                  0.0f, 20.0f,
-                  0xFF72D56A, x, startY + rowH * 5.0f, w, rowH);
+                  0xFFD18C27, x, startY + rowH * 2.0f, w, rowH);
 
     submitDrawCommands(moduleId, cmds);
 }
