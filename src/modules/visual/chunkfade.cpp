@@ -198,19 +198,28 @@ void ChunkFadeModule::onInit() {
 }
 
 void ChunkFadeModule::onEnable() {
-    if (m_patched ||
-        !m_patchTarget) {
+    if (m_patched)
         return;
+
+    // Signatures may finish resolving after module registration. Resolve the
+    // target again here instead of permanently giving up during onInit().
+    if (!m_patchTarget) {
+        const uintptr_t addr =
+            randomlythingies::bedrock::resolve(
+                bedrocktools::memory::SignatureId::RenderLevel);
+        if (addr != 0)
+            m_patchTarget = reinterpret_cast<void*>(addr);
     }
 
-    randomlythingies::hooks::install(
-        m_patchTarget,
-        reinterpret_cast<void*>(
-            _renderLevel_hook),
-        reinterpret_cast<void**>(
-            &_renderLevel_orig));
+    if (!m_patchTarget)
+        return;
 
-    m_patched = true;
+    auto* hook = randomlythingies::hooks::install(
+        m_patchTarget,
+        reinterpret_cast<void*>(_renderLevel_hook),
+        reinterpret_cast<void**>(&_renderLevel_orig));
+
+    m_patched = hook != nullptr;
 }
 
 void ChunkFadeModule::onDisable() {

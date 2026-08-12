@@ -13,8 +13,8 @@ public:
     void onEnable() override;
     void onDisable() override;
     void onFrame() override;
-    void onClientInstanceUpdate(
-        const bedrocktools::events::ClientInstanceUpdateEvent& event);
+    void loadConfig(const nlohmann::json& j) override;
+    void saveConfig(nlohmann::json& j) override;
 
 private:
     void updateCamera(bedrocktools::sdk::ClientInstance* client);
@@ -42,6 +42,4 @@ private:
     bool m_initialized = false;
     bool m_haveCamera = false;
     bedrocktools::sdk::Vec3 m_smoothedCamera{};
-
-    std::uint64_t m_clientUpdateSubscription = 0;
 };

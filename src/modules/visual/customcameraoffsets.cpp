@@ -39,33 +39,11 @@ CustomCameraOffsetsModule::CustomCameraOffsetsModule()
              "Custom third-person camera offsets with collision correction") {}
 
 void CustomCameraOffsetsModule::onInit() {
+    // Camera updates run from the shared Frame event. This avoids depending
+    // on a second ClientInstanceUpdate subscription and, importantly, lets
+    // us sample vanilla's current camera position after the normal camera
+    // update has happened.
     m_initialized = true;
-
-    const auto* api = bedrocktools::api::find();
-    if (!bedrocktools::api::compatible(api) || !api->subscribe)
-        return;
-
-    m_clientUpdateSubscription =
-        api->subscribe(
-            bedrocktools::events::EventType::ClientInstanceUpdate,
-            bedrocktools::events::EventPriority::Last,
-            [](bedrocktools::events::EventType,
-               void* payload,
-               void* userData) {
-                if (!payload || !userData)
-                    return;
-
-                auto* module =
-                    static_cast<CustomCameraOffsetsModule*>(userData);
-
-                auto* event =
-                    static_cast<
-                        bedrocktools::events::ClientInstanceUpdateEvent*
-                    >(payload);
-
-                module->onClientInstanceUpdate(*event);
-            },
-            this);
 }
 
 void CustomCameraOffsetsModule::onEnable() {
@@ -77,17 +55,48 @@ void CustomCameraOffsetsModule::onDisable() {
 }
 
 void CustomCameraOffsetsModule::onFrame() {
-    // Vanilla Bedrock cursor remains untouched. Bedrock's normal input/raycast
-    // path therefore remains responsible for interaction targeting.
-}
-
-void CustomCameraOffsetsModule::onClientInstanceUpdate(
-    const bedrocktools::events::ClientInstanceUpdateEvent& event) {
-
-    if (!m_initialized || !event.clientInstance)
+    if (!enabled || !m_initialized)
         return;
 
-    updateCamera(event.clientInstance);
+    const auto* api = bedrocktools::api::find();
+    if (!bedrocktools::api::compatible(api) || !api->clientInstance)
+        return;
+
+    updateCamera(api->clientInstance());
+}
+
+void CustomCameraOffsetsModule::loadConfig(const nlohmann::json& j) {
+    Module::loadConfig(j);
+
+    if (j.contains("m_distance")) m_distance = j["m_distance"].get<float>();
+    if (j.contains("m_minDistance")) m_minDistance = j["m_minDistance"].get<float>();
+    if (j.contains("m_maxDistance")) m_maxDistance = j["m_maxDistance"].get<float>();
+    if (j.contains("m_shoulderX")) m_shoulderX = j["m_shoulderX"].get<float>();
+    if (j.contains("m_height")) m_height = j["m_height"].get<float>();
+    if (j.contains("m_yawOffset")) m_yawOffset = j["m_yawOffset"].get<float>();
+    if (j.contains("m_pitchOffset")) m_pitchOffset = j["m_pitchOffset"].get<float>();
+    if (j.contains("m_positionSmoothing")) m_positionSmoothing = j["m_positionSmoothing"].get<float>();
+    if (j.contains("m_dynamicDistance")) m_dynamicDistance = j["m_dynamicDistance"].get<bool>();
+    if (j.contains("m_onlyThirdPerson")) m_onlyThirdPerson = j["m_onlyThirdPerson"].get<bool>();
+
+    m_minDistance = std::max(0.1f, m_minDistance);
+    m_maxDistance = std::max(m_minDistance, m_maxDistance);
+    m_distance = std::clamp(m_distance, m_minDistance, m_maxDistance);
+    m_positionSmoothing = std::clamp(m_positionSmoothing, 0.0f, 1.0f);
+}
+
+void CustomCameraOffsetsModule::saveConfig(nlohmann::json& j) {
+    Module::saveConfig(j);
+    j["m_distance"] = m_distance;
+    j["m_minDistance"] = m_minDistance;
+    j["m_maxDistance"] = m_maxDistance;
+    j["m_shoulderX"] = m_shoulderX;
+    j["m_height"] = m_height;
+    j["m_yawOffset"] = m_yawOffset;
+    j["m_pitchOffset"] = m_pitchOffset;
+    j["m_positionSmoothing"] = m_positionSmoothing;
+    j["m_dynamicDistance"] = m_dynamicDistance;
+    j["m_onlyThirdPerson"] = m_onlyThirdPerson;
 }
 
 bool CustomCameraOffsetsModule::isThirdPersonActive(
@@ -140,7 +149,15 @@ bedrocktools::sdk::Vec3 CustomCameraOffsetsModule::getDesiredCameraPosition(
         playerPos.z
     };
 
-    sdk::Vec3 desired = sub(origin, mul(norm(forward), m_distance));
+    float distance = m_distance;
+    if (m_dynamicDistance) {
+        const float vanillaDistance =
+            len(sub(playerRenderer->cameraPosition(), playerPos));
+        if (vanillaDistance > 0.01f)
+            distance = std::clamp(vanillaDistance, m_minDistance, m_maxDistance);
+    }
+
+    sdk::Vec3 desired = sub(origin, mul(norm(forward), distance));
     desired = add(desired, mul(right, m_shoulderX));
     return desired;
 }
