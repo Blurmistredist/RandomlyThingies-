@@ -44,7 +44,8 @@ void CustomCameraOffsetsModule::onInit() {
     // Use the same runtime/event infrastructure as BedrockTools rather than
     // installing a second RenderLevel/GetPerspective/HudCursor detour.
     m_clientUpdateSubscription =
-        bedrocktools::events::bus().subscribe<
+        bedrocktools::api::find()
+api->subscribe(...)
             bedrocktools::events::ClientInstanceUpdateEvent>(
             [this](const auto& event) {
                 onClientInstanceUpdate(event);
