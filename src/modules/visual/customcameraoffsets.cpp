@@ -1,6 +1,6 @@
 #include "customcameraoffsets.hpp"
 
-#include <bedrocktools/events/EventBus.hpp>
+#include <bedrocktools/events/Events.hpp>
 #include <bedrocktools/sdk/client/ClientInstance.hpp>
 #include <bedrocktools/sdk/render/LevelRenderer.hpp>
 #include <bedrocktools/sdk/render/LevelRendererPlayer.hpp>
@@ -41,16 +41,31 @@ CustomCameraOffsetsModule::CustomCameraOffsetsModule()
 void CustomCameraOffsetsModule::onInit() {
     m_initialized = true;
 
-    // Use the same runtime/event infrastructure as BedrockTools rather than
-    // installing a second RenderLevel/GetPerspective/HudCursor detour.
+    const auto* api = bedrocktools::api::find();
+    if (!bedrocktools::api::compatible(api) || !api->subscribe)
+        return;
+
     m_clientUpdateSubscription =
-        const auto* api = bedrocktools::api::find();
-api->subscribe(...)
-            bedrocktools::events::ClientInstanceUpdateEvent>(
-            [this](const auto& event) {
-                onClientInstanceUpdate(event);
+        api->subscribe(
+            bedrocktools::events::EventType::ClientInstanceUpdate,
+            bedrocktools::events::EventPriority::Last,
+            [](bedrocktools::events::EventType,
+               void* payload,
+               void* userData) {
+                if (!payload || !userData)
+                    return;
+
+                auto* module =
+                    static_cast<CustomCameraOffsetsModule*>(userData);
+
+                auto* event =
+                    static_cast<
+                        bedrocktools::events::ClientInstanceUpdateEvent*
+                    >(payload);
+
+                module->onClientInstanceUpdate(*event);
             },
-            bedrocktools::events::EventPriority::Last);
+            this);
 }
 
 void CustomCameraOffsetsModule::onEnable() {
