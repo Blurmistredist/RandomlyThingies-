@@ -175,15 +175,16 @@ void Runtime::wireEvents() {
 }
 
 bool Runtime::bedrockToolsReady() const {
+    // The public API being available is the runtime readiness condition.
+    // Do NOT gate the entire extension on one particular signature such as
+    // GetPerspective: FPS Graph only needs the event API, while modules that
+    // require signatures can resolve those targets individually. Gating the
+    // whole registry on GetPerspective made every module silently dead when
+    // that one signature was unavailable or had not finished resolving yet.
     const auto* api = bedrocktools::api::find();
-    if (!bedrocktools::api::compatible(api) || !api->resolveSignature)
-        return false;
-
-    // API presence only proves libBedrockTools.so is loaded. The resolver
-    // must also have completed before RandomlyThingies initializes modules,
-    // because their onInit() resolves function targets immediately.
-    return api->resolveSignature(static_cast<std::uint16_t>(
-        bedrocktools::memory::SignatureId::GetPerspective)) != 0;
+    return bedrocktools::api::compatible(api) &&
+           api->subscribe &&
+           api->unsubscribe;
 }
 
 bool Runtime::tryInstallFromLoadHook() {
